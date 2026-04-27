@@ -3,6 +3,7 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Adafruit_NeoPixel.h> 
 
 // ----------------------------------------------------
 // 하드웨어 핀 정의
@@ -15,8 +16,12 @@ const int BTN_4     = 37; // P1.05
 const int OLED_SDA  = 22; // P0.22
 const int OLED_SCL  = 21; // P0.21
 
+// 네오픽셀 핀 및 개수 정의
+#define NEOPIXEL_PIN 20   // P0.20
+#define NUM_LEDS     4    // 연결된 LED 개수
+
 // ----------------------------------------------------
-// OLED 및 상태 변수 설정
+// OLED, 네오픽셀 및 상태 변수 설정
 // ----------------------------------------------------
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 32
@@ -24,17 +29,35 @@ const int OLED_SCL  = 21; // P0.21
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
+// 네오픽셀 객체 생성
+Adafruit_NeoPixel pixels(NUM_LEDS, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
+
 // 버튼 이전 상태 저장용
+int lastStateShift = HIGH; 
 int lastState2 = HIGH;
 int lastState3 = HIGH;
 int lastState4 = HIGH;
 
 // 토글(번갈아 표시)을 위한 가상 상태 변수
 bool isPlaying = false; 
-bool isMuted = false;   // MUTE / NORMAL 상태 저장용 변수 추가!
+bool isMuted = false;
 
 // BLE HID 객체 생성
 BLEHidAdafruit blehid;
+
+// ----------------------------------------------------
+// 네오픽셀 랜덤 컬러 변경 함수
+// ----------------------------------------------------
+void setRandomNeoPixelColor() {
+  uint8_t r = random(0, 256);
+  uint8_t g = random(0, 256);
+  uint8_t b = random(0, 256);
+
+  for(int i = 0; i < NUM_LEDS; i++) {
+    pixels.setPixelColor(i, pixels.Color(r, g, b));
+  }
+  pixels.show(); 
+}
 
 // ----------------------------------------------------
 // 텍스트를 화면 정중앙에 출력하는 함수
@@ -57,7 +80,12 @@ void showOledMessage(const char* message) {
 }
 
 void setup() {
-  delay(1000);
+  // [수정됨] 부팅 시 찌그러진 노이즈가 LED로 들어가는 것을 막기 위해 가장 먼저 LED부터 끕니다!
+  pixels.begin();
+  pixels.clear();
+  pixels.show(); // 데이터 핀을 0으로 꽉 잡아줌
+
+  delay(1000); // 이제 안심하고 1초 대기
 
   pinMode(BTN_SHIFT, INPUT_PULLUP);
   pinMode(BTN_2, INPUT_PULLUP);
@@ -101,17 +129,28 @@ void loop() {
     return;
   }
 
-  bool isShiftPressed = (digitalRead(BTN_SHIFT) == LOW);
+  int currentStateShift = digitalRead(BTN_SHIFT);
+  bool isShiftPressed = (currentStateShift == LOW);
+  
   int currentState2 = digitalRead(BTN_2);
   int currentState3 = digitalRead(BTN_3);
   int currentState4 = digitalRead(BTN_4);
 
   // ----------------------------------------------------
+  // BTN_SHIFT
+  // ----------------------------------------------------
+  if (lastStateShift == HIGH && currentStateShift == LOW) {
+    setRandomNeoPixelColor(); 
+  }
+
+  // ----------------------------------------------------
   // BTN_2 : 다음 곡 / 볼륨 UP
   // ----------------------------------------------------
   if (lastState2 == HIGH && currentState2 == LOW) {
+    setRandomNeoPixelColor(); 
+
     if (isShiftPressed) {
-      blehid.consumerKeyPress(HID_USAGE_CONSUMER_SCAN_PREVIOUS_TRACK); 
+      blehid.consumerKeyPress(HID_USAGE_CONSUMER_SCAN_PREVIOUS_TRACK);
       showOledMessage("PREV_TRACK");
     } else {
       blehid.consumerKeyPress(HID_USAGE_CONSUMER_VOLUME_DECREMENT); 
@@ -125,25 +164,27 @@ void loop() {
   // BTN_3 : 이전 곡 / 볼륨 DOWN
   // ----------------------------------------------------
   if (lastState3 == HIGH && currentState3 == LOW) {
+    setRandomNeoPixelColor(); 
+
     if (isShiftPressed) {
-      blehid.consumerKeyPress(HID_USAGE_CONSUMER_SCAN_NEXT_TRACK); 
+      blehid.consumerKeyPress(HID_USAGE_CONSUMER_SCAN_NEXT_TRACK);
       showOledMessage("NEXT_TRACK");
     } else {
       blehid.consumerKeyPress(HID_USAGE_CONSUMER_VOLUME_INCREMENT); 
       showOledMessage("VOLUME(+)");
     }
     delay(50);
-    blehid.consumerKeyRelease();     
+    blehid.consumerKeyRelease();
   }
 
   // ----------------------------------------------------
   // BTN_4 : 음소거 / 재생 및 일시정지
   // ----------------------------------------------------
   if (lastState4 == HIGH && currentState4 == LOW) {
+    setRandomNeoPixelColor(); 
+
     if (isShiftPressed) {
-      blehid.consumerKeyPress(HID_USAGE_CONSUMER_MUTE); 
-      
-      // MUTE / NORMAL 화면 토글 로직
+      blehid.consumerKeyPress(HID_USAGE_CONSUMER_MUTE);
       if (isMuted) {
         showOledMessage("NORMAL");
         isMuted = false;
@@ -153,9 +194,7 @@ void loop() {
       }
       
     } else {
-      blehid.consumerKeyPress(HID_USAGE_CONSUMER_PLAY_PAUSE); 
-      
-      // PLAY / PAUSE 화면 토글 로직
+      blehid.consumerKeyPress(HID_USAGE_CONSUMER_PLAY_PAUSE);
       if (isPlaying) {
         showOledMessage("PAUSE");
         isPlaying = false;
@@ -168,6 +207,7 @@ void loop() {
     blehid.consumerKeyRelease();
   }
 
+  lastStateShift = currentStateShift;
   lastState2 = currentState2;
   lastState3 = currentState3;
   lastState4 = currentState4;
