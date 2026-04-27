@@ -32,11 +32,23 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 // 네오픽셀 객체 생성
 Adafruit_NeoPixel pixels(NUM_LEDS, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 
+// 밝기 제어 변수 추가 (0 ~ 4단계)
+int currentBrightnessLevel = 3; // 기본값 3
+const uint8_t brightnessMap[5] = {0, 64, 128, 192, 255}; // 0%, 25%, 50%, 75%, 100%
+
+// 현재 색상 저장용 변수 (밝기 변경 시 색상 열화 방지용)
+uint8_t currentR = 0;
+uint8_t currentG = 0;
+uint8_t currentB = 0;
+
 // 버튼 이전 상태 저장용
 int lastStateShift = HIGH; 
 int lastState2 = HIGH;
 int lastState3 = HIGH;
 int lastState4 = HIGH;
+
+// 조합키(BTN_4) 사용 여부 확인용 플래그
+bool btn4UsedAsModifier = false; 
 
 // 토글(번갈아 표시)을 위한 가상 상태 변수
 bool isPlaying = false; 
@@ -49,12 +61,21 @@ BLEHidAdafruit blehid;
 // 네오픽셀 랜덤 컬러 변경 함수
 // ----------------------------------------------------
 void setRandomNeoPixelColor() {
-  uint8_t r = random(0, 256);
-  uint8_t g = random(0, 256);
-  uint8_t b = random(0, 256);
+  currentR = random(0, 256);
+  currentG = random(0, 256);
+  currentB = random(0, 256);
 
   for(int i = 0; i < NUM_LEDS; i++) {
-    pixels.setPixelColor(i, pixels.Color(r, g, b));
+    pixels.setPixelColor(i, pixels.Color(currentR, currentG, currentB));
+  }
+  pixels.show(); 
+}
+
+// 밝기만 업데이트하고 원본 색상을 다시 입히는 함수
+void updateNeoPixelBrightness() {
+  pixels.setBrightness(brightnessMap[currentBrightnessLevel]);
+  for(int i = 0; i < NUM_LEDS; i++) {
+    pixels.setPixelColor(i, pixels.Color(currentR, currentG, currentB));
   }
   pixels.show(); 
 }
@@ -80,12 +101,13 @@ void showOledMessage(const char* message) {
 }
 
 void setup() {
-  // [수정됨] 부팅 시 찌그러진 노이즈가 LED로 들어가는 것을 막기 위해 가장 먼저 LED부터 끕니다!
+  // 네오픽셀 초기화 및 기본 밝기 설정
   pixels.begin();
+  pixels.setBrightness(brightnessMap[currentBrightnessLevel]);
   pixels.clear();
-  pixels.show(); // 데이터 핀을 0으로 꽉 잡아줌
+  pixels.show(); // 데이터 핀을 잡아주어 초기 노이즈 깜빡임 방지
 
-  delay(1000); // 이제 안심하고 1초 대기
+  delay(1000); 
 
   pinMode(BTN_SHIFT, INPUT_PULLUP);
   pinMode(BTN_2, INPUT_PULLUP);
@@ -144,67 +166,91 @@ void loop() {
   }
 
   // ----------------------------------------------------
-  // BTN_2 : 다음 곡 / 볼륨 UP
+  // BTN_2 : 다음 곡 / 볼륨 UP OR 밝기 DOWN
   // ----------------------------------------------------
   if (lastState2 == HIGH && currentState2 == LOW) {
-    setRandomNeoPixelColor(); 
-
-    if (isShiftPressed) {
-      blehid.consumerKeyPress(HID_USAGE_CONSUMER_SCAN_PREVIOUS_TRACK);
-      showOledMessage("PREV_TRACK");
+    if (currentState4 == LOW) { // BTN_4 + BTN_2 : 밝기 한 단계 낮춤
+      if (currentBrightnessLevel > 0) currentBrightnessLevel--;
+      updateNeoPixelBrightness();
+      
+      char msg[16];
+      sprintf(msg, "BRIGHT:%d", currentBrightnessLevel);
+      showOledMessage(msg);
+      
+      btn4UsedAsModifier = true; // BTN_4가 조합키로 쓰였음을 표시
     } else {
-      blehid.consumerKeyPress(HID_USAGE_CONSUMER_VOLUME_DECREMENT); 
-      showOledMessage("VOLUME(-)");
+      setRandomNeoPixelColor(); 
+
+      if (isShiftPressed) {
+        blehid.consumerKeyPress(HID_USAGE_CONSUMER_SCAN_PREVIOUS_TRACK);
+        showOledMessage("PREV_TRACK");
+      } else {
+        blehid.consumerKeyPress(HID_USAGE_CONSUMER_VOLUME_DECREMENT); 
+        showOledMessage("VOLUME(-)");
+      }
+      delay(50);
+      blehid.consumerKeyRelease();
     }
-    delay(50);
-    blehid.consumerKeyRelease();
   }
 
   // ----------------------------------------------------
-  // BTN_3 : 이전 곡 / 볼륨 DOWN
+  // BTN_3 : 이전 곡 / 볼륨 DOWN OR 밝기 UP
   // ----------------------------------------------------
   if (lastState3 == HIGH && currentState3 == LOW) {
-    setRandomNeoPixelColor(); 
-
-    if (isShiftPressed) {
-      blehid.consumerKeyPress(HID_USAGE_CONSUMER_SCAN_NEXT_TRACK);
-      showOledMessage("NEXT_TRACK");
+    if (currentState4 == LOW) { // BTN_4 + BTN_3 : 밝기 한 단계 높임
+      if (currentBrightnessLevel < 4) currentBrightnessLevel++;
+      updateNeoPixelBrightness();
+      
+      char msg[16];
+      sprintf(msg, "BRIGHT:%d", currentBrightnessLevel);
+      showOledMessage(msg);
+      
+      btn4UsedAsModifier = true; // BTN_4가 조합키로 쓰였음을 표시
     } else {
-      blehid.consumerKeyPress(HID_USAGE_CONSUMER_VOLUME_INCREMENT); 
-      showOledMessage("VOLUME(+)");
+      setRandomNeoPixelColor(); 
+
+      if (isShiftPressed) {
+        blehid.consumerKeyPress(HID_USAGE_CONSUMER_SCAN_NEXT_TRACK);
+        showOledMessage("NEXT_TRACK");
+      } else {
+        blehid.consumerKeyPress(HID_USAGE_CONSUMER_VOLUME_INCREMENT); 
+        showOledMessage("VOLUME(+)");
+      }
+      delay(50);
+      blehid.consumerKeyRelease();
     }
-    delay(50);
-    blehid.consumerKeyRelease();
   }
 
   // ----------------------------------------------------
-  // BTN_4 : 음소거 / 재생 및 일시정지
+  // BTN_4 : 음소거 / 재생 및 일시정지 (손을 뗄 때 작동)
   // ----------------------------------------------------
-  if (lastState4 == HIGH && currentState4 == LOW) {
-    setRandomNeoPixelColor(); 
+  if (lastState4 == LOW && currentState4 == HIGH) { // 버튼을 누르다 뗄 때
+    if (!btn4UsedAsModifier) { // 밝기 조절용으로 쓰지 않은 경우에만 작동
+      setRandomNeoPixelColor(); 
 
-    if (isShiftPressed) {
-      blehid.consumerKeyPress(HID_USAGE_CONSUMER_MUTE);
-      if (isMuted) {
-        showOledMessage("NORMAL");
-        isMuted = false;
+      if (isShiftPressed) {
+        blehid.consumerKeyPress(HID_USAGE_CONSUMER_MUTE);
+        if (isMuted) {
+          showOledMessage("NORMAL");
+          isMuted = false;
+        } else {
+          showOledMessage("MUTE");
+          isMuted = true;
+        }
       } else {
-        showOledMessage("MUTE");
-        isMuted = true;
+        blehid.consumerKeyPress(HID_USAGE_CONSUMER_PLAY_PAUSE);
+        if (isPlaying) {
+          showOledMessage("PAUSE");
+          isPlaying = false;
+        } else {
+          showOledMessage("PLAY");
+          isPlaying = true;
+        }
       }
-      
-    } else {
-      blehid.consumerKeyPress(HID_USAGE_CONSUMER_PLAY_PAUSE);
-      if (isPlaying) {
-        showOledMessage("PAUSE");
-        isPlaying = false;
-      } else {
-        showOledMessage("PLAY");
-        isPlaying = true;
-      }
+      delay(50);
+      blehid.consumerKeyRelease();
     }
-    delay(50);
-    blehid.consumerKeyRelease();
+    btn4UsedAsModifier = false; // 플래그 초기화
   }
 
   lastStateShift = currentStateShift;
